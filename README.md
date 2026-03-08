@@ -151,12 +151,6 @@ ssh-copy-id user@your_server_ip
 ansible all -m ping -i inventory/hosts.yml
 ```
 
-### 👨‍🎓 Note
-<p align="left">
-<img width="198" height="171" alt="image" src="https://github.com/user-attachments/assets/2c722f1b-b820-4dd7-b813-ccaaa2600c3c" />
-
-</p>
-
 <a name="credits"></a>
 
 ### 📖 Credits
@@ -308,12 +302,6 @@ ssh-copy-id utilisateur@ip_de_votre_serveur
 # Tester la connexion à l'hôte
 ansible all -m ping -i inventory/hosts.yml
 ```
-
-### 👨‍🎓 Note
-<p align="left">
-<img width="198" height="171" alt="image" src="https://github.com/user-attachments/assets/c6611943-f93e-4905-9548-4a6dbce0a951" />
-
-</p>
 
 <a name="crédits-1"></a>
 

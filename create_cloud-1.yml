@@ -1,0 +1,8 @@
+---
+- hosts: clouds
+  become: yes
+  gather_facts: yes
+  roles:
+    - common
+    - docker_setup
+    - inception_deploy

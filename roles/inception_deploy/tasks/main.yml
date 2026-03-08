@@ -1,0 +1,93 @@
+---
+- name: Create docker-compose.yml
+  ansible.builtin.template:
+    src: templates/docker-compose.yml.j2
+    dest: "/home/{{ ansible_user }}/docker-compose.yml"
+    mode: '0644'
+
+- name: Create nginx.conf
+  ansible.builtin.copy:
+    src: files/nginx.conf
+    dest: "/home/{{ ansible_user }}/nginx.conf"
+    mode: '0644'
+
+- name: Create env.yml
+  ansible.builtin.copy:
+    src: files/.env
+    dest: "/home/{{ ansible_user }}/.env"
+    mode: '0644'
+
+- name: Ensure certs directory exists
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/certs"
+    state: directory
+    mode: '0755'
+
+- name: Generate an OpenSSL private key
+  community.crypto.openssl_privatekey:
+    path: "/home/{{ ansible_user }}/certs/nginx.key"
+    size: 2048
+    mode: '0600'
+
+- name: Generate a CSR
+  community.crypto.openssl_csr:
+    path: "/home/{{ ansible_user }}/certs/nginx.csr"
+    privatekey_path: "/home/{{ ansible_user }}/certs/nginx.key"
+    common_name: "{{ DOMAIN_NAME }}"
+
+- name: Generate a Self Signed OpenSSL certificate
+  community.crypto.x509_certificate:
+    path: "/home/{{ ansible_user }}/certs/nginx.crt"
+    privatekey_path: "/home/{{ ansible_user }}/certs/nginx.key"
+    csr_path: "/home/{{ ansible_user }}/certs/nginx.csr"
+    provider: selfsigned
+    selfsigned_not_after: "+365d"
+
+- name: Start docker-compose services
+  ansible.builtin.command: docker-compose up -d --force-recreate
+  args:
+    chdir: "/home/{{ ansible_user }}"
+
+- name: Wait for WordPress container to be fully up and running
+  ansible.builtin.wait_for:
+    timeout: 15
+
+- name: Download WP-CLI in WordPress container
+  community.docker.docker_container_exec:
+    container: wordpress
+    command: curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+
+- name: Make WP-CLI executable
+  community.docker.docker_container_exec:
+    container: wordpress
+    command: chmod +x wp-cli.phar
+
+- name: Move WP-CLI to bin
+  community.docker.docker_container_exec:
+    container: wordpress
+    command: mv wp-cli.phar /usr/local/bin/wp
+
+- name: Configurer WordPress (wp-config.php)
+  community.docker.docker_container_exec:
+    container: wordpress
+    command: >
+      sh -c 'wp config create 
+      --dbname=$MYSQL_DATABASE 
+      --dbuser=$MYSQL_USER 
+      --dbpass=$MYSQL_PASSWORD 
+      --dbhost=$MYSQL_HOST 
+      --allow-root'
+    chdir: /var/www/html
+
+- name: Installer WordPress automatiquement
+  community.docker.docker_container_exec:
+    container: wordpress
+    command: >
+      sh -c 'wp core install 
+      --url=$DOMAIN_NAME
+      --title="Mon Super Blog" 
+      --admin_user=$WP_ADMIN_USER
+      --admin_password=$WP_ADMIN_PASSWORD
+      --admin_email=$WP_ADMIN_EMAIL
+      --allow-root'
+    chdir: /var/www/html

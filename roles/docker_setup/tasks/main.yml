@@ -1,0 +1,24 @@
+---
+- name: Install Docker
+  ansible.builtin.apt:
+    name: docker.io
+    state: present
+    update_cache: yes
+
+- name: Install Docker Compose
+  ansible.builtin.apt:
+    name: docker-compose
+    state: present
+    update_cache: yes
+
+- name: Add user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: yes
+
+- name: Start Docker
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: yes

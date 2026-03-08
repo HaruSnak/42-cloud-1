@@ -1,4 +1,4 @@
-<img src="readme/ft_transcendence.png" alt="ft_transcendence" width="900"/>
+<img src="readme/cloud-1.png" alt="cloud-1" width="900"/>
 
 <div align="center">
 

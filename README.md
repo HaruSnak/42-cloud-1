@@ -22,7 +22,7 @@
 
 ### 📖 About
 
-**Cloud-1** is a project for 42 School students focused on the automated deployment of a distributed web infrastructure. It builds upon the Inception project by taking the dockerized services and deploying them automatically on a remote cloud instance using Ansible. The application features a robust microservices architecture with dedicated containers for Nginx, WordPress, and MariaDB, all secured and optimized for cloud environments.
+**Cloud-1** is a project for 42 School students focused on the automated deployment of a distributed web infrastructure. It builds upon the Inception project by taking the dockerized services and deploying them automatically on a remote cloud instance using Ansible. The application features a microservices architecture with dedicated containers for Nginx, WordPress, MariaDB and phpMyAdmin, all secured and optimized for cloud environments.
 
 This project teaches:
 - System Administration and Cloud Infrastructure
@@ -31,88 +31,168 @@ This project teaches:
 - Network Security, TLS implementation, and Port Management
 - Persistent Data Management and Resilience Configurations
 
-### 🧠 Skills Learned
+### 🏗️ Architecture
 
-By completing the Cloud-1 project, students develop essential skills in system administration and DevOps:
+```
+                            INTERNET
+                                │
+               ┌────────────────┼──────────────────┐
+               │ port 22 (SSH)  │  port 80/443 (HTTP/HTTPS)
+               │                ▼
+               │          [ UFW Firewall ]
+               │       (blocks all other ports)
+               ▼
+    ┌──────────────────────────────────────────────────┐
+    │                 Ubuntu 22.04 Host                 │
+    │                                                  │
+    │   ┌──────────────────────────────────────────┐   │
+    │   │         Docker Network: cloud_network     │   │
+    │   │                                          │   │
+    │   │   ┌───────────────────────────────────┐  │   │
+    │   │   │             nginx                 │  │   │
+    │   │   │  :80  → 301 redirect to HTTPS     │  │   │
+    │   │   │  :443 → TLS 1.2/1.3 termination   │  │   │
+    │   │   │  /        → WordPress (FastCGI)   │  │   │
+    │   │   │  /phpmyadmin/ → phpMyAdmin proxy  │  │   │
+    │   │   └──────┬─────────────────┬──────────┘  │   │
+    │   │          │ FastCGI :9000   │ HTTP proxy   │   │
+    │   │   ┌──────▼──────┐  ┌──────▼──────────┐  │   │
+    │   │   │  wordpress  │  │   phpmyadmin    │  │   │
+    │   │   │  (php-fpm)  │  │  (web UI only)  │  │   │
+    │   │   └──────┬──────┘  └──────┬──────────┘  │   │
+    │   │          └────────┬────────┘             │   │
+    │   │                   │ :3306 (internal only) │   │
+    │   │          ┌────────▼────────┐             │   │
+    │   │          │    mariadb      │             │   │
+    │   │          │ (not exposed)   │             │   │
+    │   │          └─────────────────┘             │   │
+    │   └──────────────────────────────────────────┘   │
+    │                                                  │
+    │   Persistent bind-mounts:                        │
+    │   ~/data/wordpress  ~/data/mariadb  ~/certs      │
+    └──────────────────────────────────────────────────┘
+```
 
-- **Infrastructure as Code (IaC)**: Using Ansible to fully automate server configuration from a fresh OS installation.
-- **Container Orchestration**: Managing multiple communicating containers where each process runs entirely isolated.
-- **High Availability & Resilience**: Configuring automatic restarts and ensuring complete data persistence across server reboots.
-- **Network & Security**: Implementing Nginx as a reverse proxy, setting up SSL/TLS certificates, and strictly limiting exposed ports to 80, 443, and 22.
-- **Service Integration**: Integrating MariaDB, WordPress, and other tools into a cohesive and functional web application.
+**Data flow:**
+- All external traffic enters only through ports 80, 443, and 22.
+- HTTP is immediately redirected to HTTPS by nginx.
+- WordPress is served via PHP-FPM (FastCGI), never exposed directly.
+- phpMyAdmin is accessible only via the `/phpmyadmin/` path, proxied through nginx over HTTPS.
+- MariaDB is reachable only from within the Docker network — never from the internet.
+- All service data survives reboots via host-bound Docker volumes.
 
-## Approach
-This project was developed with a strong focus on modularity and security. The Ansible codebase is organized into clear components:
+### 🧱 Ansible Roles
 
-- **common**: Basic server setup, updates, and foundational tools.
-- **docker_setup**: Installation and configuration of the Docker engine and Docker Compose.
-- **inception_deploy**: Orchestration of the actual services, transferring files, and triggering docker-compose.
-
-The application strictly follows the "1 process = 1 container" rule, ensuring an independent lifecycle for each service. All deployment steps are abstracted away so the entire infrastructure can be brought up with a single command.
-
-### **Features**
-
-**Automated Ansible Deployment:** *Scripts capable of bridging an empty Ubuntu server to a fully functional WordPress site.*<br>
-
-**Microservices Architecture:** *Independent Docker containers for Nginx, WordPress, and MariaDB.*<br>
-
-**Data Persistence:** *Docker volumes configured to retain all database data and website media across reboots.*<br>
-
-**Security & TLS:** *Secured traffic via HTTPS and restricted external access to non-essential ports.*<br>
-
-**Self-Healing Services:** *Containers configured with restart policies to recover automatically from failures or server restarts.*<br>
-
-### **Features to be added:**
-
-**Multi-Server Deployment:** *Extending the playbook to scale the app across multiple nodes.*<br>
-
-**Advanced Monitoring:** *Integrating Prometheus and Grafana for real-time infrastructure metrics.*<br>
-
-**Automated Backups:** *Cron jobs to backup volumes to secure remote storage.*<br>
-
-### 📋 Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Project Structure](#project-structure)
-- [Development](#development)
-- [Credits](#credits)
-
-<a name="features"></a>
+| Role | Responsibility |
+|---|---|
+| `common` | System updates, UFW firewall (ports 22/80/443), data directories, root SSH access |
+| `docker_setup` | Install Docker + Docker Compose, enable Docker daemon on boot |
+| `inception_deploy` | Deploy docker-compose stack, generate TLS certificate, install and configure WordPress via WP-CLI |
 
 ### ✨ Features
 
-- **Automated Deployment** using Ansible
-- **Containerized Infrastructure** using Docker and Docker Compose
-- **Nginx Reverse Proxy** with SSL/TLS encryption
-- **WordPress Integration** connected to a robust MariaDB backend
-- **Persistent Storage** using Docker volumes for high resilience
-- **Strict Network Policies** exposing only HTTP, HTTPS, and SSH ports
+- **Fully Automated Deployment** — from a bare Ubuntu 22.04 instance to a running WordPress site with a single command
+- **1 Process = 1 Container** — nginx, wordpress, mariadb, phpmyadmin each in their own container
+- **TLS/HTTPS** — self-signed certificate generated at deploy time via OpenSSL
+- **Data Persistence** — Docker volumes bound to host paths survive server reboots
+- **Auto-restart on Reboot** — all containers use `restart: always`; Docker daemon is systemd-enabled
+- **Strict Firewall** — UFW blocks all ports except 22, 80, 443
+- **Multi-Server Support** — the `clouds` inventory group supports any number of parallel targets
+- **Vault-encrypted Secrets** — credentials stored with Ansible Vault, never in plaintext
+
+### 📋 Table of Contents
+
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Multi-Server Deployment](#multi-server-deployment)
+- [Domain Configuration](#domain-configuration)
+- [Project Structure](#project-structure)
+- [Credits](#credits)
+
+<a name="prerequisites"></a>
+
+### 🔧 Prerequisites
+
+On your **control node** (your local machine):
+- Ansible ≥ 2.12
+- Required Ansible collections (install once):
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+```
+
+On the **remote server**:
+- Ubuntu 22.04 LTS (or compatible)
+- SSH daemon running
+- Python 3 installed
+- Your SSH public key in `~/.ssh/authorized_keys`
 
 <a name="installation"></a>
 
 ### 🚀 Installation
 
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/HaruSnak/42-cloud-1
 cd 42-cloud-1
 
-# Configure your inventory carefully with your server's IP
-# Example in inventory/hosts.yml
+# 2. Install required Ansible collections
+ansible-galaxy collection install -r requirements.yml
 
-# Run the Ansible deployment
-ansible-playbook -i inventory/hosts.yml create_cloud-1.yml --ask-become-pass
+# 3. Edit the inventory with your server's IP and user
+#    vim inventory/hosts.yml
+
+# 4. Edit host_vars/cloud1.yml to set your domain name
+#    vim host_vars/cloud1.yml
+
+# 5. Run the playbook (Vault password required to decrypt credentials)
+ansible-playbook create_cloud-1.yml --ask-vault-pass
 ```
 
-<a name="usage"></a>
+Once complete, access your site at:
+- **WordPress**: `https://<your_domain_or_ip>/`
+- **phpMyAdmin**: `https://<your_domain_or_ip>/phpmyadmin/`
 
-### 💻 Usage
+<a name="multi-server-deployment"></a>
 
-Once the Ansible playbook completes, your remote cloud server will be fully configured.
-Access the application:
-- **Website**: https://<your_server_ip_or_domain>
+### 🖥️ Multi-Server Deployment
+
+The playbook targets the `clouds` group, which supports any number of hosts. To deploy on multiple servers in parallel, add entries to `inventory/hosts.yml`:
+
+```yaml
+all:
+  children:
+    clouds:
+      hosts:
+        cloud1:
+          ansible_host: 1.2.3.4
+          ansible_user: ubuntu
+          ansible_become_pass: "{{ become_password }}"
+        cloud2:
+          ansible_host: 5.6.7.8
+          ansible_user: ubuntu
+          ansible_become_pass: "{{ become_password }}"
+      vars:
+        ansible_python_interpreter: /usr/bin/python3
+```
+
+Ansible will provision all hosts in the group simultaneously.
+
+<a name="domain-configuration"></a>
+
+### 🌐 Domain Configuration
+
+The domain name is set per-host in `host_vars/<hostname>.yml`:
+
+```yaml
+# host_vars/cloud1.yml
+DOMAIN_NAME: yourdomain.example.com
+```
+
+The TLS certificate is generated with this common name at deploy time. You can use:
+- A free subdomain from [DuckDNS](https://www.duckdns.org/) pointing to your server IP
+- Your server's public IP directly (browser will warn about self-signed cert)
 
 <a name="project-structure"></a>
 
@@ -120,48 +200,42 @@ Access the application:
 
 ```
 42-cloud-1/
-├── ansible.cfg                 # Ansible configuration file
-├── create_cloud-1.yml          # Main Ansible playbook entry point
-├── inventory/                  # Host definitions and inventory
-├── group_vars/                 # Variables applied to groups of hosts
-├── host_vars/                  # Variables applied to specific hosts
-├── vault/                      # Encrypted secrets and passwords
-├── roles/                      # Ansible roles
-│   ├── common/                 # Server baseline configuration
-│   ├── docker_setup/           # Docker suite installation
-│   └── inception_deploy/       # Application and container deployment
-└── README.md                   # This file
-```
-
-<a name="development"></a>
-
-### 🔧 Development
-
-#### Prerequisites
-- Ansible installed on your control node
-- A remote server running an Ubuntu LTS OS with an SSH daemon and Python installed
-- Make sure you possess the relevant SSH keys and have configured the vault correctly
-
-#### Environment Setup
-```bash
-# Ensure your SSH key is authorized on the remote server
-ssh-copy-id user@your_server_ip
-
-# Test the connection to the host
-ansible all -m ping -i inventory/hosts.yml
+├── ansible.cfg                         # Ansible configuration
+├── create_cloud-1.yml                  # Main playbook entry point
+├── requirements.yml                    # Ansible collection dependencies
+├── inventory/
+│   └── hosts.yml                       # Target host definitions
+├── group_vars/
+│   └── all.yml                         # Vault-encrypted become password
+├── host_vars/
+│   └── cloud1.yml                      # Per-host vars (DOMAIN_NAME)
+└── roles/
+    ├── common/                         # System baseline + firewall
+    │   ├── tasks/main.yml
+    │   └── handlers/main.yml
+    ├── docker_setup/                   # Docker + Docker Compose install
+    │   └── tasks/main.yml
+    └── inception_deploy/               # Application stack deployment
+        ├── tasks/main.yml
+        ├── templates/
+        │   ├── docker-compose.yml.j2   # Stack definition
+        │   └── nginx.conf.j2           # Reverse proxy config
+        └── files/
+            └── .env                    # Vault-encrypted credentials
 ```
 
 <a name="credits"></a>
 
 ### 📖 Credits
 
-- **Documentation Ansible** : [Ansible.com](https://docs.ansible.com/)
-- **Documentation Docker** : [Docker.com](https://docs.docker.com/)
-- **Documentation Nginx** : [Nginx.org](https://nginx.org/en/docs/)
+- **Ansible Documentation**: [docs.ansible.com](https://docs.ansible.com/)
+- **Docker Documentation**: [docs.docker.com](https://docs.docker.com/)
+- **Nginx Documentation**: [nginx.org/en/docs](https://nginx.org/en/docs/)
+- **WP-CLI**: [wp-cli.org](https://wp-cli.org/)
 
 ### 📄 License
 
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
 
 </details>
 
@@ -174,7 +248,7 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 ### 📖 À propos
 
-**Cloud-1** est un projet pour les étudiants de l'école 42 axé sur le déploiement automatisé d'une infrastructure web distribuée. Il s'appuie sur le projet Inception en reprenant les services dockerisés et en les déployant automatiquement sur une instance cloud distante à l'aide d'Ansible. L'application présente une architecture microservices robuste avec des conteneurs dédiés pour Nginx, WordPress et MariaDB, le tout sécurisé et optimisé pour les environnements cloud.
+**Cloud-1** est un projet pour les étudiants de l'école 42 axé sur le déploiement automatisé d'une infrastructure web distribuée. Il s'appuie sur le projet Inception en reprenant les services dockerisés et en les déployant automatiquement sur une instance cloud distante à l'aide d'Ansible. L'application présente une architecture microservices avec des conteneurs dédiés pour Nginx, WordPress, MariaDB et phpMyAdmin, le tout sécurisé et optimisé pour les environnements cloud.
 
 Ce projet enseigne :
 - L'administration système et l'infrastructure Cloud
@@ -183,88 +257,168 @@ Ce projet enseigne :
 - La sécurité réseau, l'implémentation TLS et la gestion des ports
 - La gestion des données persistantes et les configurations de résilience
 
-### 🧠 Compétences acquises
+### 🏗️ Architecture
 
-En complétant le projet Cloud-1, les étudiants développent des compétences essentielles en administration système et DevOps :
+```
+                            INTERNET
+                                │
+               ┌────────────────┼──────────────────┐
+               │ port 22 (SSH)  │  port 80/443 (HTTP/HTTPS)
+               │                ▼
+               │          [ Pare-feu UFW ]
+               │       (tous les autres ports bloqués)
+               ▼
+    ┌──────────────────────────────────────────────────┐
+    │                 Hôte Ubuntu 22.04                 │
+    │                                                  │
+    │   ┌──────────────────────────────────────────┐   │
+    │   │       Réseau Docker : cloud_network       │   │
+    │   │                                          │   │
+    │   │   ┌───────────────────────────────────┐  │   │
+    │   │   │             nginx                 │  │   │
+    │   │   │  :80  → redirection 301 vers HTTPS│  │   │
+    │   │   │  :443 → terminaison TLS 1.2/1.3   │  │   │
+    │   │   │  /        → WordPress (FastCGI)   │  │   │
+    │   │   │  /phpmyadmin/ → proxy phpMyAdmin  │  │   │
+    │   │   └──────┬─────────────────┬──────────┘  │   │
+    │   │          │ FastCGI :9000   │ proxy HTTP   │   │
+    │   │   ┌──────▼──────┐  ┌──────▼──────────┐  │   │
+    │   │   │  wordpress  │  │   phpmyadmin    │  │   │
+    │   │   │  (php-fpm)  │  │  (interface web)│  │   │
+    │   │   └──────┬──────┘  └──────┬──────────┘  │   │
+    │   │          └────────┬────────┘             │   │
+    │   │                   │ :3306 (interne seul.) │   │
+    │   │          ┌────────▼────────┐             │   │
+    │   │          │    mariadb      │             │   │
+    │   │          │ (non exposée)   │             │   │
+    │   │          └─────────────────┘             │   │
+    │   └──────────────────────────────────────────┘   │
+    │                                                  │
+    │   Volumes persistants (bind-mounts) :            │
+    │   ~/data/wordpress  ~/data/mariadb  ~/certs      │
+    └──────────────────────────────────────────────────┘
+```
 
-- **Infrastructure as Code (IaC)** : Utilisation d'Ansible pour automatiser entièrement la configuration du serveur à partir d'une installation d'OS vierge.
-- **Orchestration de Conteneurs** : Gestion de multiples conteneurs communicants où chaque processus s'exécute de manière entièrement isolée.
-- **Haute Disponibilité & Résilience** : Configuration des redémarrages automatiques et assurance de la persistance complète des données après redémarrage du serveur.
-- **Réseau & Sécurité** : Implémentation de Nginx comme reverse proxy, configuration des certificats SSL/TLS et limitation stricte des ports exposés à 80, 443 et 22.
-- **Intégration de Services** : Intégration de MariaDB, WordPress et autres outils dans une application web fonctionnelle et cohérente.
+**Flux de données :**
+- Tout le trafic externe entre uniquement par les ports 80, 443 et 22.
+- Le HTTP est immédiatement redirigé vers HTTPS par nginx.
+- WordPress est servi via PHP-FPM (FastCGI), jamais exposé directement.
+- phpMyAdmin est accessible uniquement via le chemin `/phpmyadmin/`, proxifié par nginx.
+- MariaDB est joignable uniquement depuis l'intérieur du réseau Docker — jamais depuis internet.
+- Toutes les données des services survivent aux redémarrages grâce aux volumes Docker liés à l'hôte.
 
-## Approche
-Ce projet a été développé avec une forte attention sur la modularité et la sécurité. La base de code Ansible est organisée en composants clairs :
+### 🧱 Rôles Ansible
 
-- **common** : Configuration de base du serveur, mises à jour et outils fondamentaux.
-- **docker_setup** : Installation et configuration du moteur Docker et de Docker Compose.
-- **inception_deploy** : Orchestration des services réels, transfert de fichiers et déclenchement de docker-compose.
+| Rôle | Responsabilité |
+|---|---|
+| `common` | Mises à jour système, pare-feu UFW (ports 22/80/443), répertoires de données, accès SSH root |
+| `docker_setup` | Installation Docker + Docker Compose, activation du daemon Docker au démarrage |
+| `inception_deploy` | Déploiement du stack docker-compose, génération du certificat TLS, installation et configuration de WordPress via WP-CLI |
 
-L'application suit strictement la règle "1 processus = 1 conteneur", garantissant un cycle de vie indépendant pour chaque service. Toutes les étapes de déploiement sont abstraites afin que l'infrastructure complète puisse être lancée avec une seule commande.
+### ✨ Fonctionnalités
 
-### **Fonctionnalités**
-
-**Déploiement Ansible Automatisé :** *Scripts capables de transformer un serveur Ubuntu vide en un site WordPress entièrement fonctionnel.*<br>
-
-**Architecture Microservices :** *Conteneurs Docker indépendants pour Nginx, WordPress et MariaDB.*<br>
-
-**Persistance des Données :** *Volumes Docker configurés pour conserver toutes les données de la base de données et les médias du site web après redémarrage.*<br>
-
-**Sécurité & TLS :** *Trafic sécurisé via HTTPS et accès externe limité aux ports non essentiels.*<br>
-
-**Services Auto-réparateurs :** *Conteneurs configurés avec des politiques de redémarrage pour se rétablir automatiquement après des pannes ou redémarrages.*<br>
-
-### **Fonctionnalités à ajouter :**
-
-**Déploiement Multi-Serveurs :** *Extension du playbook pour déployer l'application sur plusieurs nœuds.*<br>
-
-**Surveillance Avancée :** *Intégration de Prometheus et Grafana pour obtenir des métriques d'infrastructure en temps réel.*<br>
-
-**Sauvegardes Automatisées :** *Tâches Cron pour sauvegarder les volumes vers un stockage distant sécurisé.*<br>
+- **Déploiement entièrement automatisé** — d'une instance Ubuntu 22.04 vierge à un site WordPress fonctionnel en une seule commande
+- **1 processus = 1 conteneur** — nginx, wordpress, mariadb, phpmyadmin chacun dans son propre conteneur
+- **TLS/HTTPS** — certificat auto-signé généré au moment du déploiement via OpenSSL
+- **Persistance des données** — volumes Docker liés aux chemins hôtes, survivent aux redémarrages serveur
+- **Redémarrage automatique** — tous les conteneurs utilisent `restart: always` ; le daemon Docker est activé via systemd
+- **Pare-feu strict** — UFW bloque tous les ports sauf 22, 80, 443
+- **Déploiement multi-serveurs** — le groupe d'inventaire `clouds` supporte un nombre quelconque de cibles en parallèle
+- **Secrets chiffrés** — identifiants stockés avec Ansible Vault, jamais en clair
 
 ### 📋 Table des matières
 
-- [Caractéristiques](#caractéristiques)
+- [Architecture](#architecture-1)
+- [Prérequis](#prérequis)
 - [Installation](#installation-1)
-- [Utilisation](#utilisation)
+- [Déploiement multi-serveurs](#déploiement-multi-serveurs)
+- [Configuration du domaine](#configuration-du-domaine)
 - [Structure du projet](#structure-du-projet)
-- [Développement](#développement)
-- [Crédits](#crédits-1)
+- [Crédits](#crédits)
 
-<a name="caractéristiques"></a>
+<a name="prérequis"></a>
 
-### ✨ Caractéristiques
+### 🔧 Prérequis
 
-- **Déploiement Automatisé** utilisant Ansible
-- **Infrastructure Conteneurisée** utilisant Docker et Docker Compose
-- **Reverse Proxy Nginx** avec chiffrement SSL/TLS
-- **Intégration WordPress** connecté à un backend MariaDB robuste
-- **Stockage Persistant** utilisant des volumes Docker pour une haute résilience
-- **Politiques Réseau Strictes** exposant uniquement les ports HTTP, HTTPS et SSH
+Sur votre **machine de contrôle** (en local) :
+- Ansible ≥ 2.12
+- Collections Ansible requises (à installer une fois) :
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+```
+
+Sur le **serveur distant** :
+- Ubuntu 22.04 LTS (ou compatible)
+- Daemon SSH actif
+- Python 3 installé
+- Votre clé SSH publique dans `~/.ssh/authorized_keys`
 
 <a name="installation-1"></a>
 
 ### 🚀 Installation
 
 ```bash
-# Cloner le dépôt
+# 1. Cloner le dépôt
 git clone https://github.com/HaruSnak/42-cloud-1
 cd 42-cloud-1
 
-# Configurer votre inventaire avec l'IP de votre serveur
-# Exemple dans inventory/hosts.yml
+# 2. Installer les collections Ansible requises
+ansible-galaxy collection install -r requirements.yml
 
-# Lancer le déploiement Ansible
-ansible-playbook -i inventory/hosts.yml create_cloud-1.yml --ask-become-pass
+# 3. Renseigner l'IP et l'utilisateur de votre serveur
+#    vim inventory/hosts.yml
+
+# 4. Définir votre nom de domaine dans host_vars/cloud1.yml
+#    vim host_vars/cloud1.yml
+
+# 5. Lancer le playbook (mot de passe Vault requis pour déchiffrer les credentials)
+ansible-playbook create_cloud-1.yml --ask-vault-pass
 ```
 
-<a name="utilisation"></a>
+Une fois le déploiement terminé :
+- **WordPress** : `https://<votre_domaine_ou_ip>/`
+- **phpMyAdmin** : `https://<votre_domaine_ou_ip>/phpmyadmin/`
 
-### 💻 Utilisation
+<a name="déploiement-multi-serveurs"></a>
 
-Une fois le playbook Ansible terminé, votre serveur cloud distant sera entièrement configuré.
-Accéder à l'application :
-- **Site Web** : https://<votre_ip_serveur_ou_domaine>
+### 🖥️ Déploiement multi-serveurs
+
+Le playbook cible le groupe `clouds`, qui supporte un nombre quelconque d'hôtes. Pour déployer sur plusieurs serveurs en parallèle, ajoutez des entrées dans `inventory/hosts.yml` :
+
+```yaml
+all:
+  children:
+    clouds:
+      hosts:
+        cloud1:
+          ansible_host: 1.2.3.4
+          ansible_user: ubuntu
+          ansible_become_pass: "{{ become_password }}"
+        cloud2:
+          ansible_host: 5.6.7.8
+          ansible_user: ubuntu
+          ansible_become_pass: "{{ become_password }}"
+      vars:
+        ansible_python_interpreter: /usr/bin/python3
+```
+
+Ansible provisionnera tous les hôtes du groupe simultanément.
+
+<a name="configuration-du-domaine"></a>
+
+### 🌐 Configuration du domaine
+
+Le nom de domaine est défini par hôte dans `host_vars/<nom_hote>.yml` :
+
+```yaml
+# host_vars/cloud1.yml
+DOMAIN_NAME: votredomaine.example.com
+```
+
+Le certificat TLS est généré avec ce nom commun au moment du déploiement. Options possibles :
+- Un sous-domaine gratuit via [DuckDNS](https://www.duckdns.org/) pointant vers votre IP
+- Directement l'IP publique du serveur (le navigateur avertira du certificat auto-signé)
 
 <a name="structure-du-projet"></a>
 
@@ -272,48 +426,42 @@ Accéder à l'application :
 
 ```
 42-cloud-1/
-├── ansible.cfg                 # Fichier de configuration Ansible
-├── create_cloud-1.yml          # Point d'entrée principal du playbook Ansible
-├── inventory/                  # Définition des hôtes et inventaire
-├── group_vars/                 # Variables appliquées aux groupes d'hôtes
-├── host_vars/                  # Variables appliquées aux hôtes spécifiques
-├── vault/                      # Secrets et mots de passe chiffrés
-├── roles/                      # Rôles Ansible
-│   ├── common/                 # Configuration de base du serveur
-│   ├── docker_setup/           # Installation de la suite Docker
-│   └── inception_deploy/       # Déploiement de l'application et des conteneurs
-└── README.md                   # Ce fichier
+├── ansible.cfg                         # Configuration Ansible
+├── create_cloud-1.yml                  # Point d'entrée du playbook principal
+├── requirements.yml                    # Dépendances de collections Ansible
+├── inventory/
+│   └── hosts.yml                       # Définition des hôtes cibles
+├── group_vars/
+│   └── all.yml                         # Mot de passe become chiffré (Vault)
+├── host_vars/
+│   └── cloud1.yml                      # Variables par hôte (DOMAIN_NAME)
+└── roles/
+    ├── common/                         # Baseline système + pare-feu
+    │   ├── tasks/main.yml
+    │   └── handlers/main.yml
+    ├── docker_setup/                   # Installation Docker + Docker Compose
+    │   └── tasks/main.yml
+    └── inception_deploy/               # Déploiement du stack applicatif
+        ├── tasks/main.yml
+        ├── templates/
+        │   ├── docker-compose.yml.j2   # Définition du stack
+        │   └── nginx.conf.j2           # Configuration du reverse proxy
+        └── files/
+            └── .env                    # Credentials chiffrés (Vault)
 ```
 
-<a name="développement"></a>
-
-### 🔧 Développement
-
-#### Prérequis
-- Ansible installé sur votre machine de contrôle
-- Un serveur distant sous Ubuntu LTS avec un démon SSH et Python installés
-- Assurez-vous de posséder les clés SSH adéquates et d'avoir configuré le coffre-fort (vault) correctement.
-
-#### Configuration de l'environnement
-```bash
-# S'assurer que votre clé SSH est autorisée sur le serveur distant
-ssh-copy-id utilisateur@ip_de_votre_serveur
-
-# Tester la connexion à l'hôte
-ansible all -m ping -i inventory/hosts.yml
-```
-
-<a name="crédits-1"></a>
+<a name="crédits"></a>
 
 ### 📖 Crédits
 
-- **Documentation Ansible** : [Ansible.com](https://docs.ansible.com/)
-- **Documentation Docker** : [Docker.com](https://docs.docker.com/)
-- **Documentation Nginx** : [Nginx.org](https://nginx.org/en/docs/)
+- **Documentation Ansible** : [docs.ansible.com](https://docs.ansible.com/)
+- **Documentation Docker** : [docs.docker.com](https://docs.docker.com/)
+- **Documentation Nginx** : [nginx.org/en/docs](https://nginx.org/en/docs/)
+- **WP-CLI** : [wp-cli.org](https://wp-cli.org/)
 
 ### 📄 Licence
 
-Ce projet est sous licence **MIT** - voir le fichier [LICENSE](LICENSE) pour plus de détails.
+Ce projet est sous licence **MIT** — voir le fichier [LICENSE](LICENSE) pour plus de détails.
 
 </details>
 

@@ -5,6 +5,11 @@
     cache_valid_time: 3600
     upgrade: yes
 
+- name: Set UFW default incoming policy to deny
+  community.general.ufw:
+    default: deny
+    direction: incoming
+
 - name: Enable UFW
   community.general.ufw:
     state: enabled
@@ -29,9 +34,31 @@
 
 - name: Create directory for docker data
   ansible.builtin.file:
-    path: "{{item}}"
+    path: "{{ item }}"
     state: directory
     mode: '0755'
   loop:
-    - "/home/{{ ansible_user }}/data/wordpress"
-    - "/home/{{ ansible_user }}/data/mariadb"
+    - "{{ ansible_env.HOME }}/data/wordpress"
+    - "{{ ansible_env.HOME }}/data/mariadb"
+
+- name: Ensure /root/.ssh directory exists
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    mode: '0700'
+
+- name: Copy SSH authorized_keys to root
+  ansible.builtin.copy:
+    src: "{{ ansible_env.HOME }}/.ssh/authorized_keys"
+    dest: /root/.ssh/authorized_keys
+    remote_src: yes
+    mode: '0600'
+  when: ansible_user != 'root'
+
+- name: Enable root SSH login
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PermitRootLogin'
+    line: 'PermitRootLogin yes'
+    state: present
+  notify: Restart sshd
